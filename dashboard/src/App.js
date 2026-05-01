@@ -3,12 +3,27 @@ import mqtt from 'mqtt';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 function App() {
+  const [historicoBanco, setHistoricoBanco] = useState([]);
+  const [mostrarModal, setMostrarModal] = useState(false);
   const [globalPeso, setGlobalPeso] = useState(0);
   const [logs, setLogs] = useState([]);
   const [historicoGrafico, setHistoricoGrafico] = useState([]);
   const [statusConexao, setStatusConexao] = useState('Conectando...');
   const [sistemaOnline, setSistemaOnline] = useState(true);
-  const [alertaSensor, setAlertaSensor] = useState(null); // Estado para o sensor que sumiu
+  const [alertaSensor, setAlertaSensor] = useState(null);
+
+  // 1. FUNÇÃO MOVIDA PARA FORA DO USEEFFECT (Para o botão funcionar)
+  const buscarHistorico = async () => {
+    try {
+     // Procure essa linha na função buscarHistorico e mude para:
+      const resposta = await fetch('http://127.0.0.1:5000/historico');
+      const dados = await resposta.json();
+      setHistoricoBanco(dados);
+      setMostrarModal(true);
+    } catch (error) {
+      alert("Erro ao buscar histórico. O servidor Python está rodando?");
+    }
+  };
 
   useEffect(() => {
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
@@ -23,29 +38,20 @@ function App() {
       try {
         const data = JSON.parse(message.toString());
 
-        // 1. Logs dos sensores individuais
         if (topic === 'v1/enchente/pesos') {
           setLogs(prev => [data, ...prev].slice(0, 5));
-          // Se o sensor voltou a enviar, removemos o alerta dele
           setAlertaSensor(current => current === data.sensor_id ? null : current);
         }
 
-        // 2. Lógica Global (Servidor e Monitoramento)
         if (topic === 'v1/enchente/global') {
-          
-          // CASO A: O Servidor Agregador caiu (LWT)
           if (data.status === 'OFFLINE') {
             setStatusConexao('❌ SERVIDOR FORA DO AR');
             setSistemaOnline(false);
             setGlobalPeso(0);
           } 
-          
-          // CASO B: Um sensor específico parou de responder
           else if (data.status === 'SENSOR_OFFLINE') {
             setAlertaSensor(data.sensor_id);
           }
-          
-          // CASO C: Sistema operando normalmente
           else if (data.status === 'ONLINE') {
             setStatusConexao('✅ Conectado');
             setSistemaOnline(true);
@@ -77,7 +83,13 @@ function App() {
       )}
 
       <header className="max-w-6xl mx-auto flex justify-between items-center mb-12">
-        <div>
+        <button 
+          onClick={buscarHistorico}
+          className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-lg"
+        >
+          📜 Ver Histórico do Banco
+        </button>
+        <div className="text-right">
           <h1 className="text-3xl font-black tracking-tighter text-blue-500 uppercase">Enchente Guardian</h1>
           <p className="text-slate-400 text-sm italic">Mestrado: Monitoramento de Borda v3.0</p>
         </div>
@@ -91,28 +103,23 @@ function App() {
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
           
-          {/* CARD PRINCIPAL (Status do Rio) */}
           <div className="bg-slate-900 rounded-2xl p-8 border border-slate-800 shadow-2xl relative overflow-hidden">
             <h2 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">Nível Agregado do Rio</h2>
             <div className="flex items-baseline gap-4">
               <span className="text-7xl font-black text-white tabular-nums">{globalPeso.toFixed(4)}</span>
-              
               {sistemaOnline ? (
                 <span className={`text-sm font-bold px-3 py-1 rounded-full ${
                   globalPeso > 4.0 ? 'bg-red-500 text-white' : 
                   globalPeso > 2.0 ? 'bg-amber-500 text-black' : 
                   'bg-emerald-500 text-white'
                 }`}>
-                  {globalPeso > 4.0 ? '🚨 RISCO DE ENCHENTE' : globalPeso > 2.0 ? '⚠️ ALERTA' : '✅ ESTÁVEL'}
+                  {globalPeso > 4.0 ? '🚨 RISCO' : globalPeso > 2.0 ? '⚠️ ALERTA' : '✅ ESTÁVEL'}
                 </span>
               ) : (
-                <span className="text-sm font-bold px-3 py-1 rounded-full bg-slate-800 text-slate-500 italic">
-                  SISTEMA OFFLINE
-                </span>
+                <span className="text-sm font-bold px-3 py-1 rounded-full bg-slate-800 text-slate-500 italic">OFFLINE</span>
               )}
             </div>
 
-            {/* BARRA DE PROGRESSO */}
             <div className="mt-6 h-3 w-full bg-slate-800 rounded-full overflow-hidden">
               {sistemaOnline && (
                 <div 
@@ -123,16 +130,8 @@ function App() {
                 ></div>
               )}
             </div>
-            
-            <div className="flex justify-between text-[10px] text-slate-500 mt-2 font-mono">
-              <span>0.0 (SECO)</span>
-              <span className={globalPeso > 2.0 ? 'text-amber-500' : ''}>ALERTA (2.0)</span>
-              <span className={globalPeso > 4.0 ? 'text-red-500' : ''}>RISCO (4.0)</span>
-              <span>MÁX (6.0)</span>
-            </div>
           </div>
 
-          {/* GRÁFICO */}
           <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 h-80 shadow-2xl">
             <h2 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-6">Histórico de Tendência</h2>
             <ResponsiveContainer width="100%" height="100%">
@@ -147,7 +146,6 @@ function App() {
           </div>
         </div>
 
-        {/* LOGS LATERAIS */}
         <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-xl overflow-hidden">
           <h2 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4 italic">Monitoramento Individual</h2>
           <div className="space-y-4">
@@ -162,10 +160,50 @@ function App() {
                 <p className="text-xl font-black text-white">{log.peso}</p>
               </div>
             ))}
-            {logs.length === 0 && <p className="text-slate-600 text-xs italic text-center py-10">Aguardando dados...</p>}
           </div>
         </div>
       </main>
+
+      {/* MODAL DO BANCO DE DADOS */}
+      {mostrarModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900">
+              <h2 className="text-xl font-bold text-blue-400">Histórico de Leituras (Banco)</h2>
+              <button onClick={() => setMostrarModal(false)} className="text-slate-400 hover:text-white text-2xl">✕</button>
+            </div>
+            
+            <div className="overflow-y-auto p-4 bg-slate-950/50">
+              <table className="w-full text-left text-sm text-slate-300">
+              <thead className="bg-slate-900 sticky top-0 z-10">
+                <tr className="border-b border-slate-800">
+                  <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Data/Hora</th>
+                  <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Sensor</th>
+                  <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Nível</th>
+                  <th className="p-4 text-right text-slate-500 uppercase text-[10px] font-bold">Status</th>
+                </tr>
+              </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {historicoBanco.map((item, i) => (
+                    <tr key={i} className="hover:bg-slate-800/50 transition-colors">
+                      <td className="py-3 p-2 font-mono text-blue-300">{item.hora}</td>
+                      <td className="py-3 p-2">{item.sensor}</td>
+                      <td className="py-3 p-2 text-center font-bold text-white">{item.nivel}m</td>
+                      <td className="py-3 p-2 text-right">
+                        <span className={`px-2 py-1 rounded text-[10px] font-bold ${
+                          item.status.includes('OFFLINE') ? 'bg-red-500/20 text-red-500' : 'bg-emerald-500/20 text-emerald-500'
+                        }`}>
+                          {item.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
