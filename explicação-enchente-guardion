@@ -1,0 +1,122 @@
+Sistema de monitoramento de enchentes: 
+#Enchente Guardion
+
+1 Arquitetura do sistema(visão geral)
+
+este projeto foi desenvolvido seguindo os conceitos de computação de borda(Edje computing)
+em vez de mandar toda e qualquer coleta pra nuvem(dados inuteis) o servidor ja processa localmente
+o que intessa.
+
+O sistema é dividido em três camadas principais:
+
+A: Camada de Percepção(os sensores)
+    *Dispositivos ESP32(fisico ou simulado)
+    *Função: coletam o nivel da agua via sensores ultrasonicos e enviam via protocolo MQTT
+    *Protocolo:MQTT(lighteweight)ideal para dispositivos com bateria e internet instável
+
+B: Camada de Processamento e Borda(servidor python)
+    Aqui O servidor não é apenas um banco de dados, Ele é um agregador inteligente
+        1- Assinatura MQTT: Ele "escuta" os topicos dos sensores
+        2- Agregação dos dados: Ele espera receber 3 leituras pra calcular uma "média móvel", 
+        isso filtra os ruidos(ex: um galho passando na frente do sensor)
+        3- Mononitoramento de Status(keep alive): Ele verifica se os sensores estão "vivos". 
+        se um sensor não manda os dados por 15 segundos, o sistema avisa automaticamente que aquele
+        sensor não enviou o dado permitindo com que se saiba qual sensor esta com problema..
+        4- Banco de dados local: Usa SQLITE pra garantir que os dados sobrevivam a quedas de energia
+
+C: Camada de Aplicação(Dashboard React): 
+    Visualização: Grafico em tempo real com Rechart
+    Consumo de Dados: Usa duas vias:
+        *WebSockets: Para atualização rapida do gráfico
+        *API REST(HTTP): Para buscar o histórico pesado do banco de dados quando você clica no botão
+
+
+2 O Fluxo do Dado(O caminho que o bit faz)
+    1- O sensor detecta 3.50m e publica no tópico v1\enchente\pesos
+    2- O servidor python recebe o dado e coloca num "buffer"(uma fila de espera)
+    3- Quando o servidor atinge 3 mensagens, calcula a média(ex. 3,51m)
+    4- O servidor salva no arquivo dados-enchentes.db com o status AGREGAÇÃO OK
+    5- O servidor publica a média no tópico v1\enchente\global
+    6- O React recebe essa média e atualiza o gráfico instantaneamente
+    7- O Usuario clica em ver histórico e o react faz um pedido GET para a API do PYTHON, que lê o banco
+    e devolve os ultimos 50 registros na tela
+
+3 Diferenciais Tecnicos
+    Resiliencia: o uso de LWT(Last Will and Testament) no MQTT. Se o sservidor cair o Broker avisa ao dashboard
+    imediatamente
+
+    Consistencia de dados: O sistema diferencia "Leitura Direta"(bruta) de "Agregado"(processada), permitindo
+    auditoria futura
+
+    Multitreading: O servidor roda a API(flask) e o cliente MQTT em paralelo, sem que um trave o outro
+
+PROXIMOS PASSOS:
+Fotos dos componetes(O Hardway)
+
+Print da dashboard(um com o sistema estavel e outo com o modal do histórico aberto)
+
+Diagrama de sequencia: desenho de como as menagens trocam de lugar
+o diagrama precisa mostrar dois fluxos principais: o Fluxo de Tempo Real (MQTT) e o Fluxo de Consulta 
+(API/Banco de Dados)
+
+sequenceDiagram
+    participant S as Sensor (ESP32)
+    participant B as MQTT Broker (EMQX)
+    participant P as Servidor (Python/Borda)
+    participant DB as Banco de Dados (SQLite)
+    participant R as Dashboard (React)
+
+    Note over S, R: Fluxo 1: Monitoramento em Tempo Real
+    S->>B: Publish: v1/enchente/pesos (Dado Bruto)
+    B->>P: Forward: v1/enchente/pesos
+    P->>DB: INSERT: Leitura Direta
+    
+    Note right of P: Processamento de Borda: Agrega 3 leituras
+    
+    P->>DB: INSERT: Média Agregada
+    P->>B: Publish: v1/enchente/global (Média)
+    B->>R: Forward: v1/enchente/global
+    R->>R: Atualiza Gráfico e Nível Principal
+
+    Note over S, R: Fluxo 2: Detecção de Falha (Timeout)
+    P->>P: Sensor inativo por 15s
+    P->>DB: INSERT: Status SENSOR_OFFLINE
+    P->>B: Publish: v1/enchente/global (Status Offline)
+    B->>R: Alerta visual de Sensor Caído
+
+    Note over S, R: Fluxo 3: Consulta de Histórico
+    R->>P: HTTP GET /historico (Pedido do Usuário)
+    P->>DB: SELECT * FROM leituras LIMIT 50
+    DB-->>P: Retorna Dados
+    P-->>R: JSON Response (Lista de Leituras)
+    R->>R: Abre Modal com Tabela Preenchida
+
+    Explicando o diadrama
+    Cena 1: A Coleta e Agregação (Edge Computing)
+
+Explique que o dado não vai direto para o usuário. Ele passa pelo Servidor de Borda (Python) que
+ atua como um filtro. Somente após a agregação de 3 amostras é que o sistema gera um dado "Global" 
+ confiável. Isso economiza largura de banda e evita alarmes falsos.
+
+Cena 2: A Vigilância Ativa (Health Check)
+
+Destaque a autonomia do servidor. O diagrama mostra que o Servidor Python monitora o tempo de forma 
+independente. Se o Sensor parar de falar, o próprio Servidor toma a iniciativa de atualizar o Banco 
+de Dados e avisar o Dashboard.
+
+Cena 3: O Consumo sob Demanda (API REST)
+
+Mostre a diferença entre o dado que "empurra" (Push via MQTT) e o dado que "puxa" (Pull via HTTP). O 
+histórico só é carregado quando o usuário solicita, o que torna a aplicação React muito mais leve e rápida.
+
+
+
+#Separação de responsabilidades
+
+1- SQLite: Armazena os dados brutos (Sua base de dados local).
+
+2- Scikit-Learn: Pega esses dados e gera o modelo matemático (A inteligência).
+
+3- Flask: Expõe essa inteligência para o mundo (Sua API).
+
+4- React: Mostra o resultado final para o usuário (Seu Dashboard).

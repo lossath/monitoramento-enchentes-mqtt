@@ -11,11 +11,10 @@ function App() {
   const [statusConexao, setStatusConexao] = useState('Conectando...');
   const [sistemaOnline, setSistemaOnline] = useState(true);
   const [alertaSensor, setAlertaSensor] = useState(null);
+  const [iaDados, setIaDados] = useState({ previsao_5min: 0, tendencia: 'Carregando...', pesos_federados: { w: 0, b: 0 } });
 
-  // 1. FUNÇÃO MOVIDA PARA FORA DO USEEFFECT (Para o botão funcionar)
   const buscarHistorico = async () => {
     try {
-     // Procure essa linha na função buscarHistorico e mude para:
       const resposta = await fetch('http://127.0.0.1:5000/historico');
       const dados = await resposta.json();
       setHistoricoBanco(dados);
@@ -25,9 +24,26 @@ function App() {
     }
   };
 
+  const buscarPrevisaoIA = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:5000/ia-previsao');
+      const data = await response.json();
+      if (!data.erro) {
+        setIaDados(data);
+      }
+    } catch (error) {
+      console.error("Erro ao buscar IA:", error);
+    }
+  };
+
+  useEffect(() => {
+    buscarPrevisaoIA();
+    const intervalo = setInterval(buscarPrevisaoIA, 10000);
+    return () => clearInterval(intervalo);
+  }, []);
+
   useEffect(() => {
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
-
     client.on('connect', () => {
       setStatusConexao('✅ Conectado');
       client.subscribe('v1/enchente/pesos');
@@ -37,44 +53,39 @@ function App() {
     client.on('message', (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
-
         if (topic === 'v1/enchente/pesos') {
           setLogs(prev => [data, ...prev].slice(0, 5));
           setAlertaSensor(current => current === data.sensor_id ? null : current);
         }
-
         if (topic === 'v1/enchente/global') {
           if (data.status === 'OFFLINE') {
             setStatusConexao('❌ SERVIDOR FORA DO AR');
             setSistemaOnline(false);
             setGlobalPeso(0);
-          } 
-          else if (data.status === 'SENSOR_OFFLINE') {
+          } else if (data.status === 'SENSOR_OFFLINE') {
             setAlertaSensor(data.sensor_id);
-          }
-          else if (data.status === 'ONLINE') {
+          } else if (data.status === 'ONLINE') {
             setStatusConexao('✅ Conectado');
             setSistemaOnline(true);
             const valor = Number(data.weight || data.peso) || 0;
             setGlobalPeso(valor);
-
-            const novoPonto = {
-              hora: new Date().toLocaleTimeString(),
-              peso: valor
-            };
+            const novoPonto = { hora: new Date().toLocaleTimeString(), peso: valor };
             setHistoricoGrafico(prev => [...prev, novoPonto].slice(-15));
           }
         }
       } catch (e) { console.error("Erro no processamento:", e); }
     });
-
     return () => client.end();
   }, []);
 
+  // LÓGICA DE CORES DA OPÇÃO B (Baseada no peso W)
+  const pesoW = iaDados.pesos_federados.w || 0;
+  const corTendencia = pesoW > 0.005 ? '#C53030' : (pesoW < -0.005 ? '#276749' : '#B45309');
+  const fundoCardIA = pesoW > 0.005 ? '#FFF5F5' : (pesoW < -0.005 ? '#F0F9F4' : '#FFFBEB');
+  const bordaCardIA = pesoW > 0.005 ? '#C53030' : (pesoW < -0.005 ? '#2F855A' : '#D97706');
+
   return (
     <div className="min-h-screen bg-slate-950 text-white p-8 font-sans">
-      
-      {/* ALERTA DE SENSOR CAÍDO */}
       {alertaSensor && (
         <div className="max-w-6xl mx-auto mb-4 p-4 bg-orange-500/20 border border-orange-500 text-orange-500 rounded-lg flex justify-between items-center animate-pulse">
           <span className="font-bold">⚠️ ATENÇÃO: Perda de sinal do sensor [{alertaSensor}]</span>
@@ -83,10 +94,7 @@ function App() {
       )}
 
       <header className="max-w-6xl mx-auto flex justify-between items-center mb-12">
-        <button 
-          onClick={buscarHistorico}
-          className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-lg"
-        >
+        <button onClick={buscarHistorico} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-lg">
           📜 Ver Histórico do Banco
         </button>
         <div className="text-right">
@@ -102,16 +110,13 @@ function App() {
 
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
-          
           <div className="bg-slate-900 rounded-2xl p-8 border border-slate-800 shadow-2xl relative overflow-hidden">
             <h2 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">Nível Agregado do Rio</h2>
             <div className="flex items-baseline gap-4">
               <span className="text-7xl font-black text-white tabular-nums">{globalPeso.toFixed(4)}</span>
               {sistemaOnline ? (
                 <span className={`text-sm font-bold px-3 py-1 rounded-full ${
-                  globalPeso > 4.0 ? 'bg-red-500 text-white' : 
-                  globalPeso > 2.0 ? 'bg-amber-500 text-black' : 
-                  'bg-emerald-500 text-white'
+                  globalPeso > 4.0 ? 'bg-red-500 text-white' : globalPeso > 2.0 ? 'bg-amber-500 text-black' : 'bg-emerald-500 text-white'
                 }`}>
                   {globalPeso > 4.0 ? '🚨 RISCO' : globalPeso > 2.0 ? '⚠️ ALERTA' : '✅ ESTÁVEL'}
                 </span>
@@ -119,16 +124,44 @@ function App() {
                 <span className="text-sm font-bold px-3 py-1 rounded-full bg-slate-800 text-slate-500 italic">OFFLINE</span>
               )}
             </div>
-
             <div className="mt-6 h-3 w-full bg-slate-800 rounded-full overflow-hidden">
               {sistemaOnline && (
-                <div 
-                  className={`h-full transition-all duration-1000 ${
-                    globalPeso > 4.0 ? 'bg-red-600' : globalPeso > 2.0 ? 'bg-amber-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: `${Math.min((globalPeso / 6) * 100, 100)}%` }} 
-                ></div>
+                <div className={`h-full transition-all duration-1000 ${
+                  globalPeso > 4.0 ? 'bg-red-600' : globalPeso > 2.0 ? 'bg-amber-500' : 'bg-emerald-500'
+                }`} style={{ width: `${Math.min((globalPeso / 6) * 100, 100)}%` }}></div>
               )}
+            </div>
+          </div>
+
+          {/* CARD DE IA COM OPÇÃO B (ESTADO AMARRELO/ESTÁVEL) */}
+          <div className="painel-ia" style={{
+            padding: '20px', 
+            borderRadius: '12px', 
+            backgroundColor: fundoCardIA,
+            borderLeft: `10px solid ${bordaCardIA}`,
+            border: `1px solid ${bordaCardIA}50`,
+            marginBottom: '25px',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+            transition: 'all 0.5s ease'
+          }}>
+            <h2 style={{ margin: '0 0 15px 0', color: '#2D3748', fontSize: '1.2rem' }}>🤖 Inteligência de Borda (Edge AI)</h2>
+            <div style={{ display: 'flex', gap: '30px', flexWrap: 'wrap' }}>
+              <div>
+                <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#718096', letterSpacing: '0.05em' }}>PREVISÃO (5 MIN)</span>
+                <p style={{ fontSize: '28px', fontWeight: '800', margin: 0, color: '#1A202C' }}>{iaDados.previsao_5min}m</p>
+              </div>
+              <div>
+                <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#718096', letterSpacing: '0.05em' }}>TENDÊNCIA</span>
+                <p style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: corTendencia }}>
+                  {pesoW > 0.005 ? 'SUBINDO' : (pesoW < -0.005 ? 'DESCENDO' : 'ESTÁVEL')}
+                </p>
+              </div>
+              <div style={{ backgroundColor: '#EDF2F7', padding: '10px', borderRadius: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#4A5568' }}>PESOS FEDERADOS (W)</span>
+                <p style={{ fontSize: '16px', fontFamily: '"Courier New", monospace', fontWeight: 'bold', margin: 0, color: '#2D3748' }}>
+                  {pesoW.toFixed(6)}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -164,7 +197,6 @@ function App() {
         </div>
       </main>
 
-      {/* MODAL DO BANCO DE DADOS */}
       {mostrarModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col shadow-2xl">
@@ -172,17 +204,16 @@ function App() {
               <h2 className="text-xl font-bold text-blue-400">Histórico de Leituras (Banco)</h2>
               <button onClick={() => setMostrarModal(false)} className="text-slate-400 hover:text-white text-2xl">✕</button>
             </div>
-            
             <div className="overflow-y-auto p-4 bg-slate-950/50">
               <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-900 sticky top-0 z-10">
-                <tr className="border-b border-slate-800">
-                  <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Data/Hora</th>
-                  <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Sensor</th>
-                  <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Nível</th>
-                  <th className="p-4 text-right text-slate-500 uppercase text-[10px] font-bold">Status</th>
-                </tr>
-              </thead>
+                <thead className="bg-slate-900 sticky top-0 z-10">
+                  <tr className="border-b border-slate-800">
+                    <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Data/Hora</th>
+                    <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Sensor</th>
+                    <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Nível</th>
+                    <th className="p-4 text-right text-slate-500 uppercase text-[10px] font-bold">Status</th>
+                  </tr>
+                </thead>
                 <tbody className="divide-y divide-slate-800">
                   {historicoBanco.map((item, i) => (
                     <tr key={i} className="hover:bg-slate-800/50 transition-colors">

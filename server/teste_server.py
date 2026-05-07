@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime
 from flask import Flask, jsonify
 from flask_cors import CORS
+from brain_edge import treinar_e_prever
 import threading
 
 # --- Configurações ---
@@ -130,6 +131,17 @@ def rodar_api():
 
 # Inicia a API em uma "thread" separada
 threading.Thread(target=rodar_api, daemon=True).start()
+
+ # rota para a IA
+@app.route('/ia-previsao', methods=['GET'])
+def get_ia_previsao():
+    resultado = treinar_e_prever()
+    
+    # Se der erro ou não tiver dados, retornamos um status amigável
+    if isinstance(resultado, str):
+        return jsonify({"erro": resultado}), 200
+        
+    return jsonify(resultado), 200
 
 # --- SETUP DO CLIENTE ---
 cliente = mqtt.Client()
