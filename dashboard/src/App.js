@@ -25,15 +25,20 @@ function App() {
   };
 
   const buscarPrevisaoIA = async () => {
-    try {
-      const response = await fetch('http://127.0.0.1:5000/ia-previsao');
-      const data = await response.json();
-      if (!data.erro) {
-        setIaDados(data);
-      }
-    } catch (error) {
-      console.error("Erro ao buscar IA:", error);
-    }
+  try {
+    const response = await fetch('http://127.0.0.1:5000/ia-previsao');
+    const data = await response.json();
+    
+    // Agora atualizamos os dados sempre, 
+    // garantindo que a chuva apareça mesmo que a IA dê erro de treino
+    setIaDados(prev => ({
+      ...prev,   // Mantém o que já tinha
+      ...data    // Sobrescreve com o que veio do servidor (incluindo a chuva)
+    }));
+    
+  } catch (error) {
+    console.error("Erro ao buscar IA:", error);
+  }
   };
 
   useEffect(() => {
@@ -162,6 +167,20 @@ function App() {
                   {pesoW.toFixed(6)}
                 </p>
               </div>
+              {/* Adicione isso dentro do seu display de IA no App.js */}
+<div style={{ backgroundColor: '#EBF8FF', padding: '10px', borderRadius: '8px' }}>
+  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#2C5282' }}>
+    🌧️ CHUVA ATUAL
+  </span>
+  <p style={{ 
+      fontSize: '16px', 
+      fontWeight: 'bold',
+      margin: 0, 
+      color: '#2A4365' 
+  }}>
+    {iaDados.chuva !== undefined ? iaDados.chuva : '0.0'} mm/h
+  </p>
+</div>
             </div>
           </div>
 
@@ -212,6 +231,8 @@ function App() {
                     <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Sensor</th>
                     <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Nível</th>
                     <th className="p-4 text-right text-slate-500 uppercase text-[10px] font-bold">Status</th>
+                  <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Chuva</th>
+
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -227,6 +248,7 @@ function App() {
                           {item.status}
                         </span>
                       </td>
+                      <td className="py-3 p-2 text-center font-bold text-blue-400">{item.chuva}mm</td>
                     </tr>
                   ))}
                 </tbody>

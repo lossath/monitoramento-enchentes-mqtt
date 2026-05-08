@@ -11,37 +11,45 @@ SENSOR_ID = "ESP32_SIMULADO"
 client = mqtt.Client()
 client.connect(BROKER, 1883, 60)
 
-print("⛈️ Simulador de Ciclo de Inundação iniciado.")
-print("Sequência: Normal -> Tempestade -> Estiagem (Baixando) -> Normal")
+print("⛈️ Simulador Multi-modal (Nível + Chuva) iniciado.")
 
-peso_atual = 1.5  # Começa no nível estável
-estado = "NORMAL" # Estados: NORMAL, SUBINDO, TOPO, BAIXANDO
+peso_atual = 1.5 
+chuva_atual = 0.0
+estado = "NORMAL"
 contador_estado = 0
 
 try:
     while True:
         contador_estado += 1
         
-        # --- LÓGICA DE TRANSIÇÃO DE ESTADOS ---
-        if estado == "NORMAL" and contador_estado > 10:
-            estado = "SUBINDO"
-            contador_estado = 0
-            print("\n⛈️ A chuva começou! O nível vai subir...")
+        # --- LÓGICA DE TRANSIÇÃO E CONTROLE DA CHUVA ---
+        if estado == "NORMAL":
+            chuva_atual = 0.0
+            if contador_estado > 10:
+                estado = "SUBINDO"
+                contador_estado = 0
+                print("\n⛈️ A chuva começou forte!")
 
-        elif estado == "SUBINDO" and peso_atual >= 5.0:
-            estado = "TOPO"
-            contador_estado = 0
-            print("\n🚨 Nível crítico atingido! Estabilizando no topo...")
+        elif estado == "SUBINDO":
+            chuva_atual = random.uniform(15.0, 35.0) # Chuva forte faz o nível subir
+            if peso_atual >= 5.0:
+                estado = "TOPO"
+                contador_estado = 0
+                print("\n🚨 Nível crítico atingido!")
 
-        elif estado == "TOPO" and contador_estado > 15:
-            estado = "BAIXANDO"
-            contador_estado = 0
-            print("\n🌤️ A chuva parou. O nível está baixando...")
+        elif estado == "TOPO":
+            chuva_atual = random.uniform(5.0, 15.0) # Chuva diminui mas continua
+            if contador_estado > 15:
+                estado = "BAIXANDO"
+                contador_estado = 0
+                print("\n🌤️ A chuva parou. O nível está baixando...")
 
-        elif estado == "BAIXANDO" and peso_atual <= 1.5:
-            estado = "NORMAL"
-            contador_estado = 0
-            print("\n✅ Rio voltou ao leito normal.")
+        elif estado == "BAIXANDO":
+            chuva_atual = 0.0
+            if peso_atual <= 1.5:
+                estado = "NORMAL"
+                contador_estado = 0
+                print("\n✅ Rio voltou ao leito normal.")
 
         # --- CÁLCULO DO PESO BASEADO NO ESTADO ---
         variacao_ruido = random.uniform(-0.05, 0.05)
@@ -49,24 +57,26 @@ try:
         if estado == "NORMAL":
             peso_atual = 1.5 + variacao_ruido
         elif estado == "SUBINDO":
-            peso_atual += 0.15  # Sobe rápido
+            peso_atual += 0.15 
         elif estado == "TOPO":
-            peso_atual = 5.0 + random.uniform(-0.1, 0.1) # Oscila no topo
+            peso_atual = 5.0 + random.uniform(-0.1, 0.1)
         elif estado == "BAIXANDO":
-            peso_atual -= 0.10  # Desce um pouco mais devagar que sobe
+            peso_atual -= 0.10
 
-        # Chance de erro 999.0 (Filtro do Servidor)
+        # Simulação de erro 999.0
         peso_envio = 999.0 if random.randint(1, 20) == 1 else round(peso_atual, 4)
 
+        # --- PAYLOAD MULTI-MODAL ---
         payload = json.dumps({
             "sensor_id": SENSOR_ID,
-            "peso": peso_envio
+            "peso": peso_envio,
+            "chuva": round(chuva_atual, 2) # Agora a chuva varia conforme o estado!
         })
         
         client.publish(TOPICO, payload)
         
-        status_msg = f"[{estado}] Nível: {peso_envio}"
-        if peso_envio == 999.0: status_msg += " ⚠️ (ANOMALIA INJETADA)"
+        status_msg = f"[{estado}] Nível: {peso_envio}m | Chuva: {round(chuva_atual, 2)}mm"
+        if peso_envio == 999.0: status_msg += " ⚠️ (ANOMALIA)"
         print(status_msg)
         
         time.sleep(1)

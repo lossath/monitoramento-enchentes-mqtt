@@ -1,7 +1,6 @@
 import paho.mqtt.client as mqtt
 import json
 import time
-import os
 import sqlite3
 from datetime import datetime
 from flask import Flask, jsonify
@@ -15,163 +14,106 @@ TOPICO_PESOS = "v1/enchente/pesos"
 TOPICO_GLOBAL = "v1/enchente/global"
 
 app = Flask(__name__)
-CORS(app) # Isso permite que o React acesse o Python
-
+CORS(app)
 
 pesos_recebidos = []
-sensores_ativos = set()
-limiar_agregacao = 3
+chuva_recente = 0.0  # Variável global
 ultimas_leituras = {}
 TEMPO_LIMITE_SENSOR = 15 
 
-# === FUNÇÃO DO BANCO DE DADOS ===
-def init_db():
-    conn = sqlite3.connect('dados_enchentes.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS leituras (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data_hora TEXT,
-            sensor_name TEXT,
-            nivel REAL,
-            status TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def salvar_no_banco(sensor, valor, status_info="ONLINE"):
+def salvar_no_banco(sensor, valor, chuva_valor=0.0, status_info="ONLINE"):
     try:
         conn = sqlite3.connect('dados_enchentes.db')
         cursor = conn.cursor()
         agora = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-        
         cursor.execute('''
-            INSERT INTO leituras (data_hora, sensor_name, nivel, status)
-            VALUES (?, ?, ?, ?)
-        ''', (agora, sensor, valor, status_info))
-        
+            INSERT INTO leituras (data_hora, sensor_name, nivel, chuva, status)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (agora, sensor, valor, chuva_valor, status_info))
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"❌ Erro ao salvar no banco: {e}")
 
-# Inicializa o banco ao rodar o script
-init_db()
-
-def ao_conectar(client, userdata, flags, rc):
-    if rc == 0:
-        print("✅ CONECTADO AO BROKER COM SUCESSO!")
-        client.subscribe(TOPICO_PESOS)
-    else:
-        print(f"❌ FALHA NA CONEXÃO. Código: {rc}")
-
 def ao_receber_mensagem(client, userdata, msg):
-    global pesos_recebidos, sensores_ativos
+    # O segredo está em garantir que estas variáveis sejam tratadas como globais aqui
+    global pesos_recebidos, chuva_recente 
     try:
         data = json.loads(msg.payload.decode())
         s_id = data.get("sensor_id")
         peso = float(data.get("peso", 0))
-
-        # Registrar presença do sensor
+        chuva = float(data.get("chuva", 0.0))
+        
+        # Atualizando a variável que a rota /ia-previsao vai ler
+        chuva_recente = chuva 
+        
+        print(f"📡 MQTT Recebido: Nível {peso} | Chuva {chuva_recente}")
         ultimas_leituras[s_id] = time.time()
 
         if 0.05 < peso < 10.0:
             pesos_recebidos.append(peso)
-            sensores_ativos.add(s_id)
+            salvar_no_banco(s_id, peso, chuva, "LEITURA_DIRETA")
             
-            # --- 💾 SALVAMENTO 1: Salva o dado individual do sensor ---
-            salvar_no_banco(s_id, peso, "LEITURA_DIRETA")
-            
-            print(f"📥 {s_id}: {peso} | Buffer: {len(pesos_recebidos)}/3 | 💾 Salvo!")
-
-            if len(pesos_recebidos) >= limiar_agregacao:
-                media = sum(pesos_recebidos) / 3
-                media_redonda = round(media, 4)
+            if len(pesos_recebidos) >= 3:
+                media = round(sum(pesos_recebidos) / 3, 4)
+                salvar_no_banco("AGREGADO_SISTEMA", media, chuva, "AGREGACAO_OK")
                 
-                # --- 💾 SALVAMENTO 2: Salva a média agregada ---
-                salvar_no_banco("AGREGADO_SISTEMA", media_redonda, "AGREGACAO_OK")
-                
-                payload = json.dumps({"peso": media_redonda, "status": "ONLINE"})
+                payload = json.dumps({"peso": media, "status": "ONLINE"})
                 client.publish(TOPICO_GLOBAL, payload, retain=True)
-                
-                print(f"--- 🧠 AGREGAÇÃO: {media_redonda} --- 💾 Salvo!")
                 pesos_recebidos.clear()
-                sensores_ativos.clear()
-        else:
-            if peso != 999: print(f"⚠️ Dado fora da faixa: {peso}")
-
     except Exception as e:
         print(f"⚠️ Erro no processamento: {e}")
+
+# --- ROTAS API ---
 
 @app.route('/historico', methods=['GET'])
 def obter_historico():
     conn = sqlite3.connect('dados_enchentes.db')
     cursor = conn.cursor()
-    # Pega as últimas 50 leituras
-    cursor.execute("SELECT data_hora, sensor_name, nivel, status FROM leituras ORDER BY id DESC LIMIT 50")
+    cursor.execute("SELECT data_hora, sensor_name, nivel, chuva, status FROM leituras ORDER BY id DESC LIMIT 50")
     dados = cursor.fetchall()
     conn.close()
     
-    # Formata para o React entender
     retorno = []
     for d in dados:
         retorno.append({
             "hora": d[0],
             "sensor": d[1],
             "nivel": d[2],
-            "status": d[3]
+            "chuva": d[3],
+            "status": d[4]
         })
     return jsonify(retorno)
 
-# Função para rodar o Flask sem travar o MQTT
-def rodar_api():
-    # O host="0.0.0.0" ajuda o Windows a liberar o acesso
-    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
-
-# Inicia a API em uma "thread" separada
-threading.Thread(target=rodar_api, daemon=True).start()
-
- # rota para a IA
 @app.route('/ia-previsao', methods=['GET'])
 def get_ia_previsao():
+    global chuva_recente  # Garante que ele acesse a variável atualizada pelo MQTT
+    
+    # 1. Pega o dicionário que a IA gerou (esse que você me mandou)
     resultado = treinar_e_prever()
     
-    # Se der erro ou não tiver dados, retornamos um status amigável
+    # 2. Se a IA retornou erro (string), criamos um dicionário básico
     if isinstance(resultado, str):
-        return jsonify({"erro": resultado}), 200
-        
+        resultado = {"erro": resultado}
+    
+    # 3. A MÁGICA: Injetamos a chuva no dicionário ANTES de enviar para o React
+    resultado["chuva"] = round(chuva_recente, 2)
+    
+    # Agora o JSON terá: {"atual": 2.21, ..., "chuva": 30.66}
     return jsonify(resultado), 200
 
-# --- SETUP DO CLIENTE ---
-cliente = mqtt.Client()
-cliente.on_connect = ao_conectar
-cliente.on_message = ao_receber_mensagem
+# --- SETUP MQTT ---
+def rodar_mqtt():
+    # É importante criar o cliente dentro da função da thread em algumas versões do paho
+    cliente = mqtt.Client()
+    cliente.on_message = ao_receber_mensagem
+    cliente.connect(BROKER, 1883, 60)
+    cliente.subscribe(TOPICO_PESOS)
+    cliente.loop_forever()
 
-# Vontade de morrer (LWT)
-cliente.will_set(TOPICO_GLOBAL, json.dumps({"status": "OFFLINE", "peso": 0}), qos=1, retain=True)
+# Iniciando a thread do MQTT
+thread_mqtt = threading.Thread(target=rodar_mqtt, daemon=True)
+thread_mqtt.start()
 
-print("🔄 Tentando conectar...")
-cliente.connect(BROKER, 1883, 60)
-
-# Iniciando o loop
-cliente.loop_start()
-
-try:
-    while True:
-        agora = time.time()
-        for s_id, last_time in list(ultimas_leituras.items()):
-            if agora - last_time > TEMPO_LIMITE_SENSOR:
-                print(f"⚠️ Sensor {s_id} sumiu!")
-                
-                # registra a queda do sensor no banco:
-                salvar_no_banco(s_id, 0.0, "SENSOR_OFFLINE")
-                
-                cliente.publish(TOPICO_GLOBAL, json.dumps({"status": "SENSOR_OFFLINE", "sensor_id": s_id}))
-                del ultimas_leituras[s_id]
-        
-        time.sleep(5)
-
-except KeyboardInterrupt:
-    print("Finalizando...")    
-    cliente.loop_stop()
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
