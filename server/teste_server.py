@@ -43,26 +43,23 @@ def ao_receber_mensagem(client, userdata, msg):
         peso = float(data.get("peso", 0))
         chuva = float(data.get("chuva", 0.0))
         
-        # Atualizando a variável global
         chuva_recente = chuva 
         
         print(f"📡 MQTT Recebido: Nível {peso} | Chuva {chuva_recente}")
         ultimas_leituras[s_id] = time.time()
 
-        # Filtro de ruído
         if 0.05 < peso < 10.0:
             pesos_recebidos.append(peso)
             salvar_no_banco(s_id, peso, chuva, "LEITURA_DIRETA")
             
-            # Quando juntamos 3 leituras, calculamos a média e enviamos para o Dashboard
+            # AQUI ESTAVA O ERRO (Corrigido para pesos_recebidos)
             if len(pesos_recebidos) >= 3:
                 media = round(sum(pesos_recebidos) / 3, 4)
                 salvar_no_banco("AGREGADO_SISTEMA", media, chuva_recente, "AGREGACAO_OK")
                 
-                # --- CORREÇÃO AQUI: Enviando a CHUVA no payload global ---
                 payload = json.dumps({
                     "peso": media, 
-                    "chuva": chuva_recente, # Agora o React vai ver a chuva!
+                    "chuva": chuva_recente, 
                     "status": "ONLINE",
                     "sensor_id": "SISTEMA_AGREGADO"
                 })
@@ -71,7 +68,7 @@ def ao_receber_mensagem(client, userdata, msg):
                 
     except Exception as e:
         print(f"⚠️ Erro no processamento: {e}")
-
+        
 # --- ROTAS API ---
 
 @app.route('/historico', methods=['GET'])
@@ -107,6 +104,12 @@ def get_ia_previsao():
 def rodar_mqtt():
     cliente = mqtt.Client()
     cliente.on_message = ao_receber_mensagem
+    
+    # --- ADIÇÃO DO WILL SET (Testamento) ---
+    # Se o Python cair, o Broker avisa o React enviando essa mensagem:
+    payload_morte = json.dumps({"status": "SERVER_DOWN", "peso": 0, "chuva": 0})
+    cliente.will_set(TOPICO_GLOBAL, payload_morte, qos=1, retain=True)
+    
     cliente.connect(BROKER, 1883, 60)
     cliente.subscribe(TOPICO_PESOS)
     cliente.loop_forever()

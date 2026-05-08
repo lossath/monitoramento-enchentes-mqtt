@@ -1,70 +1,87 @@
-# Getting Started with Create React App
+🌊 Guardian AI: Monitoramento de Enchentes com Edge AI
+Este projeto apresenta um sistema inteligente de monitoramento de níveis fluviais 
+utilizando Inteligência de Borda (Edge AI). O sistema utiliza redes neurais recorrentes 
+(LSTM) para prever tendências de enchentes com base na correlação entre o nível do rio e
+ a precipitação pluviométrica.
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+ 🛠️ Arquitetura do Sistema
+O projeto é dividido em três camadas principais:
 
-## Available Scripts
+Camada de Percepção (Sensores): Simuladores de sensores IoT que enviam dados via protocolo MQTT.
 
-In the project directory, you can run:
+Camada de Inteligência (Backend/Edge): Servidor Flask em Python que processa os dados, gerencia o banco de dados SQLite e executa o modelo de Deep Learning (TensorFlow/Keras).
 
-### `npm start`
+Camada de Apresentação (Frontend): Dashboard moderno em React com monitoramento em tempo real, alertas de falhas e visualização multivariada.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+🚀 Principais Funcionalidades
+Previsão com LSTM: Rede Neural que analisa os últimos 15 minutos para prever o nível dos próximos 5 minutos.
 
-### `npm test`
+Monitoramento Multivariado: Gráficos correlacionando Nível (m) e Chuva (mm).
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Resiliência e Tolerância a Falhas:
 
-### `npm run build`
+Heartbeat Monitoring: Alerta visual se um sensor ficar inativo por mais de 15s.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+Last Will Message: Detecção automática de queda do servidor central.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Arquitetura Limpa: Componentização no React e separação de responsabilidades no Python.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
 
-### `npm run eject`
+🧪 Tecnologias Utilizadas
+Camada     Tecnologia
+IA/Deep Learning-----------Python, TensorFlow, Keras, NumPy
+Backend--------------------Flask, Flask-CORS, Paho-MQTT
+Frontend-------------------React.js, Recharts, TailwindCSS
+Comunicação----------------MQTT (Broker EMQX), WebSockets
+Banco de Dados-------------SQLite3
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+ESTRUTURA DE PASTAS
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+├── dashboard/          # Frontend React (Interface do Usuário)
+│   ├── src/
+│   │   ├── App.js      # Lógica principal e MQTT
+│   │   ├── Components.js # Componentes visuais (Cards, Gráficos)
+│   │   └── App.css     # Estilização Glassmorphism
+├── server/             # Backend Python e IA
+│   ├── brain_edge.py   # Núcleo da IA (Treino e Predição LSTM)
+│   ├── teste_server.py # Servidor Flask e Gateway MQTT
+│   ├── simulador.py    # Gerador de dados sintéticos de sensores
+│   └── dados_enchentes.db # Banco de dados (Ignorado no Git)
+└── .gitignore          # Filtro de arquivos para o repositório
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+⚙️ Como Executar o Projeto
+1. Clone o repositório:
+git clone https://github.com/seu-usuario/guardian-ai.git
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+2. Inicie o Servidor Backend:
+cd server
+    python teste_server.py
+    ```
 
-## Learn More
+3.  **Inicie o Simulador de Sensores:**
+    
+```bash
+    cd server
+    python simulador_sensor.py
+    ```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+4.  **Inicie o Dashboard:**
+    
+```bash
+    cd dashboard
+    npm install
+    npm start
+    ```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+---
 
-### Code Splitting
+## 🎓 Contexto Acadêmico
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+Este projeto faz parte de uma intenção de pesquisa de **Mestrado em Engenharia de Computação**, 
+com foco em otimização de algoritmos de Machine Learning para hardware embarcado e 
+monitoramento de desastres naturais em tempo real.
 
-### Analyzing the Bundle Size
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Autor: Augusta Estendar
