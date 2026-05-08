@@ -4,3 +4,4 @@ venv/
 .env
 *.db
 build/
+server/*.db-journal

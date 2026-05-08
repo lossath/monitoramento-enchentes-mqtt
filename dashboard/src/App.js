@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import mqtt from 'mqtt';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 function App() {
   const [historicoBanco, setHistoricoBanco] = useState([]);
@@ -11,7 +11,7 @@ function App() {
   const [statusConexao, setStatusConexao] = useState('Conectando...');
   const [sistemaOnline, setSistemaOnline] = useState(true);
   const [alertaSensor, setAlertaSensor] = useState(null);
-  const [iaDados, setIaDados] = useState({ previsao_5min: 0, tendencia: 'Carregando...', pesos_federados: { w: 0, b: 0 } });
+  const [iaDados, setIaDados] = useState({ previsao_5min: 0, tendencia: 'Carregando...', chuva: 0 });
 
   const buscarHistorico = async () => {
     try {
@@ -25,20 +25,16 @@ function App() {
   };
 
   const buscarPrevisaoIA = async () => {
-  try {
-    const response = await fetch('http://127.0.0.1:5000/ia-previsao');
-    const data = await response.json();
-    
-    // Agora atualizamos os dados sempre, 
-    // garantindo que a chuva apareça mesmo que a IA dê erro de treino
-    setIaDados(prev => ({
-      ...prev,   // Mantém o que já tinha
-      ...data    // Sobrescreve com o que veio do servidor (incluindo a chuva)
-    }));
-    
-  } catch (error) {
-    console.error("Erro ao buscar IA:", error);
-  }
+    try {
+      const response = await fetch('http://127.0.0.1:5000/ia-previsao');
+      const data = await response.json();
+      setIaDados(prev => ({
+        ...prev,
+        ...data
+      }));
+    } catch (error) {
+      console.error("Erro ao buscar IA:", error);
+    }
   };
 
   useEffect(() => {
@@ -72,9 +68,15 @@ function App() {
           } else if (data.status === 'ONLINE') {
             setStatusConexao('✅ Conectado');
             setSistemaOnline(true);
-            const valor = Number(data.weight || data.peso) || 0;
-            setGlobalPeso(valor);
-            const novoPonto = { hora: new Date().toLocaleTimeString(), peso: valor };
+            const valorPeso = Number(data.weight || data.peso) || 0;
+            const valorChuva = Number(data.chuva) || 0; // Captura a chuva do MQTT
+            setGlobalPeso(valorPeso);
+            
+            const novoPonto = { 
+              hora: new Date().toLocaleTimeString(), 
+              peso: valorPeso,
+              chuva: valorChuva
+            };
             setHistoricoGrafico(prev => [...prev, novoPonto].slice(-15));
           }
         }
@@ -83,11 +85,10 @@ function App() {
     return () => client.end();
   }, []);
 
-  // LÓGICA DE CORES DA OPÇÃO B (Baseada no peso W)
-  const pesoW = iaDados.pesos_federados.w || 0;
-  const corTendencia = pesoW > 0.005 ? '#C53030' : (pesoW < -0.005 ? '#276749' : '#B45309');
-  const fundoCardIA = pesoW > 0.005 ? '#FFF5F5' : (pesoW < -0.005 ? '#F0F9F4' : '#FFFBEB');
-  const bordaCardIA = pesoW > 0.005 ? '#C53030' : (pesoW < -0.005 ? '#2F855A' : '#D97706');
+  // Cores baseadas na tendência vinda da IA
+  const corTendencia = iaDados.tendencia === 'SUBINDO' ? '#C53030' : (iaDados.tendencia === 'DESCENDO' ? '#276749' : '#B45309');
+  const fundoCardIA = iaDados.tendencia === 'SUBINDO' ? '#FFF5F5' : (iaDados.tendencia === 'DESCENDO' ? '#F0F9F4' : '#FFFBEB');
+  const bordaCardIA = iaDados.tendencia === 'SUBINDO' ? '#C53030' : (iaDados.tendencia === 'DESCENDO' ? '#2F855A' : '#D97706');
 
   return (
     <div className="min-h-screen bg-slate-950 text-white p-8 font-sans">
@@ -138,7 +139,6 @@ function App() {
             </div>
           </div>
 
-          {/* CARD DE IA COM OPÇÃO B (ESTADO AMARRELO/ESTÁVEL) */}
           <div className="painel-ia" style={{
             padding: '20px', 
             borderRadius: '12px', 
@@ -158,41 +158,63 @@ function App() {
               <div>
                 <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#718096', letterSpacing: '0.05em' }}>TENDÊNCIA</span>
                 <p style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: corTendencia }}>
-                  {pesoW > 0.005 ? 'SUBINDO' : (pesoW < -0.005 ? 'DESCENDO' : 'ESTÁVEL')}
+                  {iaDados.tendencia}
                 </p>
               </div>
               <div style={{ backgroundColor: '#EDF2F7', padding: '10px', borderRadius: '8px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#4A5568' }}>PESOS FEDERADOS (W)</span>
-                <p style={{ fontSize: '16px', fontFamily: '"Courier New", monospace', fontWeight: 'bold', margin: 0, color: '#2D3748' }}>
-                  {pesoW.toFixed(6)}
+                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#4A5568' }}>MODELO IA</span>
+                <p style={{ fontSize: '16px', fontWeight: 'bold', margin: 0, color: '#2D3748' }}>LSTM Recorrente</p>
+                <span style={{ fontSize: '10px', color: '#718096' }}>Status: Ativo</span>
+              </div>
+              <div style={{ backgroundColor: '#EBF8FF', padding: '10px', borderRadius: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#2C5282' }}>🌧️ CHUVA ATUAL</span>
+                <p style={{ fontSize: '16px', fontWeight: 'bold', margin: 0, color: '#2A4365' }}>
+                  {iaDados.chuva !== undefined ? iaDados.chuva : '0.0'} mm/h
                 </p>
               </div>
-              {/* Adicione isso dentro do seu display de IA no App.js */}
-<div style={{ backgroundColor: '#EBF8FF', padding: '10px', borderRadius: '8px' }}>
-  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#2C5282' }}>
-    🌧️ CHUVA ATUAL
-  </span>
-  <p style={{ 
-      fontSize: '16px', 
-      fontWeight: 'bold',
-      margin: 0, 
-      color: '#2A4365' 
-  }}>
-    {iaDados.chuva !== undefined ? iaDados.chuva : '0.0'} mm/h
-  </p>
-</div>
             </div>
           </div>
 
-          <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 h-80 shadow-2xl">
-            <h2 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-6">Histórico de Tendência</h2>
+          <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 h-96 shadow-2xl">
+            <h2 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-6">Correlação Nível x Chuva</h2>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={historicoGrafico}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="hora" stroke="#64748b" fontSize={10} />
-                <YAxis stroke="#64748b" fontSize={10} domain={[0, 6]} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b' }} />
-                <Line type="monotone" dataKey="peso" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} isAnimationActive={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="hora" stroke="#64748b" fontSize={10} tickMargin={10} />
+                
+                {/* Eixo Esquerdo: Nível do Rio */}
+                <YAxis yAxisId="left" stroke="#3b82f6" fontSize={10} domain={[0, 6]} />
+                
+                {/* Eixo Direito: Chuva */}
+                <YAxis yAxisId="right" orientation="right" stroke="#0ea5e9" fontSize={10} domain={[0, 100]} />
+                
+                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} />
+                <Legend verticalAlign="top" height={36}/>
+
+                {/* Linha 1: Nível (Eixo Esquerdo) */}
+                <Line 
+                  yAxisId="left" 
+                  name="Nível (m)"
+                  type="monotone" 
+                  dataKey="peso" 
+                  stroke="#3b82f6" 
+                  strokeWidth={4} 
+                  dot={false} 
+                  isAnimationActive={false} 
+                />
+
+                {/* Linha 2: Chuva (Eixo Direito) */}
+                <Line 
+                  yAxisId="right" 
+                  name="Chuva (mm)"
+                  type="monotone" 
+                  dataKey="chuva" 
+                  stroke="#0ea5e9" 
+                  strokeDasharray="5 5" 
+                  strokeWidth={2} 
+                  dot={false} 
+                  isAnimationActive={false} 
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -231,8 +253,7 @@ function App() {
                     <th className="p-4 text-left text-slate-500 uppercase text-[10px] font-bold">Sensor</th>
                     <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Nível</th>
                     <th className="p-4 text-right text-slate-500 uppercase text-[10px] font-bold">Status</th>
-                  <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Chuva</th>
-
+                    <th className="p-4 text-center text-slate-500 uppercase text-[10px] font-bold">Chuva</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">

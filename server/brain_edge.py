@@ -1,63 +1,83 @@
-import sqlite3 # Faltava importar aqui!
-import pandas as pd
+import sqlite3
 import numpy as np
-from sklearn.linear_model import LinearRegression
-import time
+import pandas as pd
+import os
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import LSTM, Dense
+from sklearn.preprocessing import MinMaxScaler
+
+# Nome do arquivo onde o "cérebro" será guardado
+MODELO_FILE = 'modelo_enchente.keras'
 
 def treinar_e_prever():
     try:
-        # 1. Conecta ao banco
+        # 1. CONEXÃO COM O BANCO
         conn = sqlite3.connect('dados_enchentes.db')
-        
-        # 2. Pega os registros
-        query = "SELECT nivel FROM leituras ORDER BY data_hora DESC LIMIT 50"
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query("SELECT nivel, chuva FROM leituras ORDER BY id DESC LIMIT 100", conn)
         conn.close()
 
-        # Verificação de segurança: precisa de dados para a IA não "chutar"
-        if len(df) < 5: 
-            return "Dados insuficientes (mínimo 5 registros)"
+        if len(df) < 20:
+            return "Dados insuficientes (mínimo 20)."
+
+        df = df.iloc[::-1] # Ordem cronológica
+
+        # 2. NORMALIZAÇÃO
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        dados_escamos = scaler.fit_transform(df)
+
+        # 3. PREPARAÇÃO DA JANELA (Windowing)
+        window = 10
+        X, y = [], []
+        for i in range(len(dados_escamos) - window):
+            X.append(dados_escamos[i:i+window])
+            y.append(dados_escamos[i+window, 0])
+
+        X, y = np.array(X), np.array(y)
+
+        # 4. CARREGAR OU CRIAR MODELO
+        if os.path.exists(MODELO_FILE):
+            # Se o arquivo existe, carregamos o "cérebro" anterior
+            model = load_model(MODELO_FILE)
+            # Treinamos apenas um pouquinho com os dados novos (Incremental Learning)
+            model.fit(X, y, epochs=5, verbose=0)
+        else:
+            # Se não existe, criamos um do zero
+            model = Sequential([
+                LSTM(50, activation='relu', input_shape=(X.shape[1], X.shape[2])),
+                Dense(1)
+            ])
+            model.compile(optimizer='adam', loss='mse')
+            model.fit(X, y, epochs=20, verbose=0)
+
+        # 5. SALVAR O PROGRESSO
+        model.save(MODELO_FILE)
+
+        # 6. PREDIÇÃO
+        ultima_janela = dados_escamos[-window:].reshape(1, window, 2)
+        predicao_escamada = model.predict(ultima_janela, verbose=0)
         
-        # ORDEM CORRETA: Primeiro criamos a variável, depois usamos no print
-        niveis = df['nivel'].values[::-1]
-        
-        # DEBUG no terminal do VS Code para você ver os dados mudando
-        print(f"-> IA processando {len(niveis)} registros. Último valor: {niveis[-1]}")
-        
-        # 3. Preparação dos dados para a Regressão
-        X = np.array(range(len(niveis))).reshape(-1, 1)
-        y = niveis
+        dummy = np.zeros((1, 2))
+        dummy[0, 0] = predicao_escamada[0, 0]
+        resultado_final = scaler.inverse_transform(dummy)[0, 0]
 
-        # 4. O Cérebro da IA (Edge Computing)
-        modelo = LinearRegression()
-        modelo.fit(X, y)
+        # 7. LÓGICA DE TENDÊNCIA (A que ajustamos ontem)
+        nivel_atual = float(df['nivel'].iloc[-1])
+        chuva_atual = float(df['chuva'].iloc[-1])
+        diferenca = resultado_final - nivel_atual
 
-        # Previsão para o próximo ponto no tempo
-        proximo_passo = np.array([[len(niveis) + 1]])
-        previsao = modelo.predict(proximo_passo)[0]
+        if diferenca > 0.005 or (nivel_atual > 5.8 and chuva_atual > 10):
+            tendencia = "SUBINDO"
+        elif diferenca < -0.005:
+            tendencia = "DESCENDO"
+        else:
+            tendencia = "ESTÁVEL"
 
-        # Coeficiente angular (Tendência)
-        coeficiente = modelo.coef_[0]
-        intercepto = modelo.intercept_
-
-        # Retorno formatado para o Flask/React
         return {
-            "atual": float(round(niveis[-1], 2)),
-            "previsao_5min": float(round(previsao, 2)),
-            "tendencia": "SUBINDO" if coeficiente > 0.001 else "ESTÁVEL/DESCENDO",
-            "pesos_federados": {
-                "w": float(coeficiente), 
-                "b": float(intercepto)
-            }
+            "atual": round(float(nivel_atual), 2),
+            "previsao_5min": round(float(resultado_final), 2),
+            "tendencia": tendencia,
+            "chuva": round(float(chuva_atual), 2)
         }
 
     except Exception as e:
-        print(f"ERRO CRÍTICO NA IA: {e}")
-        return f"Erro na IA: {e}"
-
-if __name__ == "__main__":
-    print("Iniciando teste local da IA...")
-    while True:
-        resultado = treinar_e_prever()
-        print(resultado)
-        time.sleep(5)
+        return f"Erro na IA: {str(e)}"

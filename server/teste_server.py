@@ -36,7 +36,6 @@ def salvar_no_banco(sensor, valor, chuva_valor=0.0, status_info="ONLINE"):
         print(f"❌ Erro ao salvar no banco: {e}")
 
 def ao_receber_mensagem(client, userdata, msg):
-    # O segredo está em garantir que estas variáveis sejam tratadas como globais aqui
     global pesos_recebidos, chuva_recente 
     try:
         data = json.loads(msg.payload.decode())
@@ -44,23 +43,32 @@ def ao_receber_mensagem(client, userdata, msg):
         peso = float(data.get("peso", 0))
         chuva = float(data.get("chuva", 0.0))
         
-        # Atualizando a variável que a rota /ia-previsao vai ler
+        # Atualizando a variável global
         chuva_recente = chuva 
         
         print(f"📡 MQTT Recebido: Nível {peso} | Chuva {chuva_recente}")
         ultimas_leituras[s_id] = time.time()
 
+        # Filtro de ruído
         if 0.05 < peso < 10.0:
             pesos_recebidos.append(peso)
             salvar_no_banco(s_id, peso, chuva, "LEITURA_DIRETA")
             
+            # Quando juntamos 3 leituras, calculamos a média e enviamos para o Dashboard
             if len(pesos_recebidos) >= 3:
                 media = round(sum(pesos_recebidos) / 3, 4)
-                salvar_no_banco("AGREGADO_SISTEMA", media, chuva, "AGREGACAO_OK")
+                salvar_no_banco("AGREGADO_SISTEMA", media, chuva_recente, "AGREGACAO_OK")
                 
-                payload = json.dumps({"peso": media, "status": "ONLINE"})
+                # --- CORREÇÃO AQUI: Enviando a CHUVA no payload global ---
+                payload = json.dumps({
+                    "peso": media, 
+                    "chuva": chuva_recente, # Agora o React vai ver a chuva!
+                    "status": "ONLINE",
+                    "sensor_id": "SISTEMA_AGREGADO"
+                })
                 client.publish(TOPICO_GLOBAL, payload, retain=True)
                 pesos_recebidos.clear()
+                
     except Exception as e:
         print(f"⚠️ Erro no processamento: {e}")
 
@@ -87,31 +95,22 @@ def obter_historico():
 
 @app.route('/ia-previsao', methods=['GET'])
 def get_ia_previsao():
-    global chuva_recente  # Garante que ele acesse a variável atualizada pelo MQTT
-    
-    # 1. Pega o dicionário que a IA gerou (esse que você me mandou)
+    global chuva_recente 
     resultado = treinar_e_prever()
-    
-    # 2. Se a IA retornou erro (string), criamos um dicionário básico
     if isinstance(resultado, str):
         resultado = {"erro": resultado}
     
-    # 3. A MÁGICA: Injetamos a chuva no dicionário ANTES de enviar para o React
     resultado["chuva"] = round(chuva_recente, 2)
-    
-    # Agora o JSON terá: {"atual": 2.21, ..., "chuva": 30.66}
     return jsonify(resultado), 200
 
 # --- SETUP MQTT ---
 def rodar_mqtt():
-    # É importante criar o cliente dentro da função da thread em algumas versões do paho
     cliente = mqtt.Client()
     cliente.on_message = ao_receber_mensagem
     cliente.connect(BROKER, 1883, 60)
     cliente.subscribe(TOPICO_PESOS)
     cliente.loop_forever()
 
-# Iniciando a thread do MQTT
 thread_mqtt = threading.Thread(target=rodar_mqtt, daemon=True)
 thread_mqtt.start()
 
