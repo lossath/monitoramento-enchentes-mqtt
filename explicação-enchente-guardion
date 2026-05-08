@@ -120,3 +120,5 @@ histórico só é carregado quando o usuário solicita, o que torna a aplicaçã
 3- Flask: Expõe essa inteligência para o mundo (Sua API).
 
 4- React: Mostra o resultado final para o usuário (Seu Dashboard).
+
+"Séries Temporais Multivariadas com Redes Neurais Recorrentes" : Tema
