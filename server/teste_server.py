@@ -52,7 +52,6 @@ def ao_receber_mensagem(client, userdata, msg):
             pesos_recebidos.append(peso)
             salvar_no_banco(s_id, peso, chuva, "LEITURA_DIRETA")
             
-            # AQUI ESTAVA O ERRO (Corrigido para pesos_recebidos)
             if len(pesos_recebidos) >= 3:
                 media = round(sum(pesos_recebidos) / 3, 4)
                 salvar_no_banco("AGREGADO_SISTEMA", media, chuva_recente, "AGREGACAO_OK")
