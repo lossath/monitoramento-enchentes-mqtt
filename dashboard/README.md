@@ -1,4 +1,5 @@
 🌊 Guardian AI: Monitoramento de Enchentes com Edge AI
+
 Este projeto apresenta um sistema inteligente de monitoramento de níveis fluviais 
 utilizando Inteligência de Borda (Edge AI). O sistema utiliza redes neurais recorrentes 
 (LSTM) para prever tendências de enchentes com base na correlação entre o nível do rio e

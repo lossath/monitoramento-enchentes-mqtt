@@ -11,7 +11,7 @@ const char* mqtt_broker = "broker.emqx.io";
 const int mqtt_port = 1883;
 const char* topic_pesos = "v1/enchente/pesos";
 
-// Pinos seguros para evitar travamento de boot
+// Pinos seguros para evitar travamento de boot, (5v=VN, GND= NEGATIVO -, TRIG = D25, ECHO = D26)
 const int PIN_TRIG = 25;
 const int PIN_ECHO = 26;
 const float ALTURA_DA_PONTE = 6.0; 

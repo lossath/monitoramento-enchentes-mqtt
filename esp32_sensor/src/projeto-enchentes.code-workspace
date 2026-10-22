@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"name": "esp32_sensor",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}
